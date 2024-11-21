@@ -7,6 +7,9 @@
 #include <stdio.h>
 #include <unistd.h>
 #include <math.h>
+#include <stdlib.h>
+#include <string.h>
+#include <errno.h>
 
 JNIEXPORT jint JNICALL Java_xzr_perfmon_JniTools_getCpuFreq
         (JNIEnv *env, jclass jclass1, jint cpu) {
@@ -83,13 +86,47 @@ JNIEXPORT jint JNICALL Java_xzr_perfmon_JniTools_getCpuLoad
 
 JNIEXPORT jint JNICALL Java_xzr_perfmon_JniTools_getCpuOnlineStatus
         (JNIEnv *env, jclass jclass1, jint cpu) {
-    int status;
+    int status = 0;
     char path[DEFAULT_PATH_SIZE];
+    char command[DEFAULT_PATH_SIZE];
+    FILE *fp;
 
+    // 构建目标路径
     sprintf(path, "/sys/devices/system/cpu/cpu%d/online", cpu);
-    if (read_file_int(path, &status))
-        return UNSUPPORTED;
 
+    // 尝试以普通用户读取文件
+    fp = fopen(path, "r");
+    if (fp != NULL) {
+        // 如果成功读取文件，直接返回状态
+        if (fscanf(fp, "%d", &status) != 1) {
+            fclose(fp);
+            return UNSUPPORTED;  // 读取失败
+        }
+        fclose(fp);
+        return status;
+    }
+
+    // 如果文件不可读取（如权限不足），尝试通过 root 修改文件权限
+    sprintf(command, "su -c \"chmod o+r %s\"", path);  // 只为其他用户添加读取权限
+
+    // 执行修改权限命令
+    if (system(command) != 0) {
+        return UNSUPPORTED;  // 如果修改权限失败，返回 UNSUPPORTED
+    }
+
+    // 再次尝试以普通用户读取文件
+    fp = fopen(path, "r");
+    if (fp == NULL) {
+        return UNSUPPORTED;  // 如果仍然无法读取文件，返回 UNSUPPORTED
+    }
+
+    // 成功读取文件
+    if (fscanf(fp, "%d", &status) != 1) {
+        fclose(fp);
+        return UNSUPPORTED;  // 读取失败
+    }
+
+    fclose(fp);
     return status;
 }
 
